@@ -19,6 +19,9 @@ COPY requirements.txt ./
 # Install Python requirements inside virtual environment
 RUN python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
 
+# Ensure correct browser binaries are verified/installed
+RUN ./venv/bin/python -m playwright install chromium
+
 # Copy all application files
 COPY . .
 
