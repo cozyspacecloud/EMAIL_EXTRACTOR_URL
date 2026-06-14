@@ -24,7 +24,15 @@ export async function POST(req: NextRequest) {
     const stream = new ReadableStream({
         async start(controller) {
             // Spawn Python process
-            const pythonCmd = process.platform === "win32" ? "py" : "python3";
+            let pythonCmd = "python3";
+            if (process.platform === "win32") {
+                pythonCmd = "py";
+            } else {
+                const venvPython = path.join(process.cwd(), "venv", "bin", "python");
+                if (fs.existsSync(venvPython)) {
+                    pythonCmd = venvPython;
+                }
+            }
             const pythonProcess = spawn(pythonCmd, ["email.py", tmpFile], {
                 cwd: process.cwd(),
                 env: { ...process.env, PYTHONUNBUFFERED: "1", PYTHONIOENCODING: "utf-8" }
