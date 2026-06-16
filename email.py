@@ -321,20 +321,19 @@ async def extract_from_page_text(page):
             lines = text_with_spaces.split('\n')
             for line in lines[:500]:
                 found_emails = extract_clean_emails(line)
-                emails.extend(found_emails)
-                
-    except Exception as e:
-        logging.debug(f"Error extracting from page text: {e}")
-    
-    return list(set(emails))
-
 async def find_contact_link(page, base_url):
-    """Find contact page link"""
+    """Find contact page link - only checks existing links, no blind path guessing"""
     try:
         contact_selectors = [
             'a[href*="contact"]',
             'a[href*="kontakt"]',
+            'a[href*="contacto"]',
+            'a[href*="contactez"]',
+            'a[href*="contatti"]',
+            'a[href*="contato"]',
+            'a[href*="impressum"]',
             'a:has-text("Contact")',
+            'a:has-text("Contacto")',
             'a:has-text("Kontakt")',
             'footer a[href*="contact"]',
             'nav a[href*="contact"]'
@@ -352,20 +351,36 @@ async def find_contact_link(page, base_url):
             except:
                 continue
         
-        # Try common paths
-        for path in CONTACT_PATHS[:5]:
-            contact_url = urljoin(base_url, path)
-            try:
-                response = await page.goto(contact_url, wait_until="domcontentloaded", timeout=3000)
-                if response and response.status == 200:
-                    return contact_url
-            except:
-                continue
-        
         return None
     except Exception as e:
         logging.debug(f"Error finding contact link: {e}")
         return None
+
+def extract_emails_from_html(html_content):
+    """Extract emails directly from raw HTML content"""
+    if not html_content:
+        return []
+    
+    emails = set()
+    
+    # 1. Extract from mailto: links first (most reliable)
+    for match in re.finditer(r'mailto:([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})', html_content, re.IGNORECASE):
+        emails.add(match.group(1).strip().lower())
+    
+    # 2. Strip script/style/noscript blocks
+    html_cleaned = re.sub(r'<script[^>]*>.*?</script>', ' ', html_content, flags=re.DOTALL | re.IGNORECASE)
+    html_cleaned = re.sub(r'<style[^>]*>.*?</style>', ' ', html_cleaned, flags=re.DOTALL | re.IGNORECASE)
+    html_cleaned = re.sub(r'<noscript[^>]*>.*?</noscript>', ' ', html_cleaned, flags=re.DOTALL | re.IGNORECASE)
+    html_cleaned = re.sub(r'<!--.*?-->', ' ', html_cleaned, flags=re.DOTALL)
+    
+    # 3. Replace tags with spaces so text doesn't merge
+    text = re.sub(r'<[^>]+>', ' ', html_cleaned)
+    
+    # 4. Extract emails from cleaned text
+    found = extract_clean_emails(text)
+    emails.update(found)
+    
+    return list(emails)
 
 async def process_website(url, index, total, playwright):
     """Process a single website to extract emails"""
@@ -392,11 +407,8 @@ async def process_website(url, index, total, playwright):
         context = await browser.new_context(
             ignore_https_errors=True,
             viewport={'width': 1920, 'height': 1080},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         )
-        
-        # COLLECT ALL CONTENT IN STAGES
-        collected_content = []
         
         page = await context.new_page()
         
@@ -405,59 +417,44 @@ async def process_website(url, index, total, playwright):
             url = 'https://' + url
         
         result['url'] = url
+        all_emails = set()
         
-        # --- HOMEPAGE LOADING ---
+        # --- STAGE 1: HOMEPAGE ---
         print(f"   🌐 Loading homepage...")
         try:
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT)
+            await page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT)
             
-            # Stage 1: Text Content
-            print(f"   copy all content in homepage")
-            hp_text = await page.evaluate("document.body.innerText")
-            collected_content.append(hp_text)
-            print(f"   paste in lite 1.4")
+            # Extract emails from homepage HTML
+            hp_html = await page.content()
+            hp_emails = extract_emails_from_html(hp_html)
+            all_emails.update(hp_emails)
             
-            # Stage 2: HTML Content (Inspect phase)
-            # Find contact link while on homepage
+            # Also get mailto links directly from DOM
+            print(f"   inspecting the home page")
+            mailto_emails = await extract_from_mailto_links(page)
+            all_emails.update(mailto_emails)
+            print(f"   paste in in lite 1.4")
+            
+            # --- STAGE 2: CONTACT PAGE ---
             contact_url = await find_contact_link(page, url)
             
-            # --- CONTACT PAGE LOADING ---
             if contact_url and contact_url != url:
                 print(f"   loading contact ...")
                 try:
-                    await page.goto(contact_url, wait_until="domcontentloaded", timeout=15000)
+                    await page.goto(contact_url, wait_until="domcontentloaded", timeout=20000)
                     print(f"   copy all content in contact")
-                    cp_text = await page.evaluate("document.body.innerText")
-                    collected_content.append(cp_text)
-                    print(f"   paste in lite 1.4")
-                except:
-                    print(f"   ⚠️ Could not load contact page")
-            else:
-                # Still print looking logs if needed or just skip
-                pass
-
-            # Stage 3: Inspect Homepage HTML
-            print(f"   inspecting the home page")
-            print(f"   copy all html element in homepage")
-            # Navigate back to homepage to get fresh HTML or use stored?
-            # User wants "inspect the homepage" which implies the HTML
-            # We already have hp_text, now we need HTML.
-            # Re-visiting is safest to follow user's "loading... loading..." flow
-            await page.goto(url, wait_until="domcontentloaded", timeout=10000)
-            hp_html = await page.content()
-            collected_content.append(hp_html)
-            print(f"   paste in in lite 1.4")
-            
-            # Stage 4: Inspect Contact Page HTML
-            if contact_url and contact_url != url:
-                print(f"   copy all html element in contact")
-                try:
-                    await page.goto(contact_url, wait_until="domcontentloaded", timeout=10000)
                     cp_html = await page.content()
-                    collected_content.append(cp_html)
                     print(f"   paste in lite 1.4")
-                except:
-                    pass
+                    
+                    cp_emails = extract_emails_from_html(cp_html)
+                    all_emails.update(cp_emails)
+                    
+                    print(f"   copy all html element in contact")
+                    cp_mailto = await extract_from_mailto_links(page)
+                    all_emails.update(cp_mailto)
+                    print(f"   paste in lite 1.4")
+                except Exception as ce:
+                    print(f"   ⚠️ Could not load contact page: {str(ce)[:60]}")
             
             print(f"\n   then extract the emails")
             
@@ -470,15 +467,8 @@ async def process_website(url, index, total, playwright):
             await browser.close()
             return result
         
-        # 2. PERFORM EXTRACTION VIA LITE14.US (FINAL STEP)
-        all_text_blob = "\n\n".join(collected_content)
-        lite14_emails = await extract_via_lite14(playwright, context, all_text_blob)
-        
-        if lite14_emails:
-            result['emails'].extend(lite14_emails)
-        
         # FINAL DEDUPLICATION AND FILTERING
-        result['emails'] = sorted(list(set(result['emails'])))
+        result['emails'] = sorted(list(all_emails))
         
         # Display results
         if result['emails']:
