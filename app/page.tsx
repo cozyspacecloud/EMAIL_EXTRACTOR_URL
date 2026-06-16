@@ -81,8 +81,20 @@ export default function Dashboard() {
                         setIsAuthChecking(false);
                         return;
                     }
+                    // Only clear if server explicitly says invalid
+                    if (data.valid === false) {
+                        localStorage.removeItem("cozy_auth");
+                        localStorage.removeItem("cozy_license_key");
+                        setIsAuthenticated(false);
+                        setIsAuthChecking(false);
+                        return;
+                    }
                 } catch (err) {
-                    console.error("Auth check failed:", err);
+                    // Network error (server unreachable) — keep user logged in
+                    console.error("Auth check failed, keeping session:", err);
+                    setIsAuthenticated(true);
+                    setIsAuthChecking(false);
+                    return;
                 }
             }
             localStorage.removeItem("cozy_auth");
@@ -116,16 +128,18 @@ export default function Dashboard() {
                     body: JSON.stringify({ key: savedKey }),
                 });
                 const data = await res.json();
-                if (!data.valid) {
+                // Only log out if server explicitly says the key is invalid (deleted)
+                if (data.valid === false) {
                     setIsAuthenticated(false);
                     localStorage.removeItem("cozy_auth");
                     localStorage.removeItem("cozy_license_key");
                     setInputKey("");
                 }
             } catch (err) {
-                console.error("Polling validation failed:", err);
+                // Network error — do NOT log out, server may be temporarily unavailable
+                console.error("Polling validation failed, keeping session:", err);
             }
-        }, 1000);
+        }, 5000);
 
         return () => clearInterval(interval);
     }, [isAuthenticated]);
