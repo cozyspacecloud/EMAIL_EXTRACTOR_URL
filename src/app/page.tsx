@@ -28,6 +28,21 @@ export default function LicenseGenerator() {
           // Merge server history with locally saved keys to ensure persistence
           const merged = Array.from(new Set([...data.history, ...parsedSaved]));
           setHistory(merged);
+
+          // Auto-sync any saved keys back to the server if they are missing
+          const missingFromServer = parsedSaved.filter((k) => !data.history.includes(k));
+          for (const missingKey of missingFromServer) {
+            try {
+              await fetch("/api/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: missingKey })
+              });
+              console.log(`Auto-synced saved key back to server: ${missingKey}`);
+            } catch (err) {
+              console.error(`Failed to auto-sync key ${missingKey}:`, err);
+            }
+          }
         } else {
           setHistory(parsedSaved);
         }
@@ -40,8 +55,10 @@ export default function LicenseGenerator() {
   }, []);
 
   const toggleSaveKey = useCallback((keyToSave: string) => {
+    let willBeSaved = false;
     setSavedKeys((prev) => {
       const isSaved = prev.includes(keyToSave);
+      willBeSaved = !isSaved;
       const updated = isSaved ? prev.filter((k) => k !== keyToSave) : [...prev, keyToSave];
       try {
         localStorage.setItem("cozy_saved_keys", JSON.stringify(updated));
@@ -58,6 +75,17 @@ export default function LicenseGenerator() {
       }
       return prev;
     });
+
+    // Sync saved key with backend database immediately when saved
+    if (willBeSaved) {
+      fetch("/api/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: keyToSave })
+      }).catch((err) => {
+        console.error("Failed to sync key on save:", err);
+      });
+    }
   }, []);
 
   const generateKey = useCallback(async () => {
