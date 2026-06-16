@@ -321,6 +321,13 @@ async def extract_from_page_text(page):
             lines = text_with_spaces.split('\n')
             for line in lines[:500]:
                 found_emails = extract_clean_emails(line)
+                emails.extend(found_emails)
+                
+    except Exception as e:
+        logging.debug(f"Error extracting from page text: {e}")
+    
+    return list(set(emails))
+
 async def find_contact_link(page, base_url):
     """Find contact page link - only checks existing links, no blind path guessing"""
     try:
