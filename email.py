@@ -311,8 +311,8 @@ async def extract_from_page_text(page):
             html_cleaned = re.sub(r'<script[^>]*>.*?</script>', ' ', html_source, flags=re.DOTALL | re.IGNORECASE)
             html_cleaned = re.sub(r'<style[^>]*>.*?</style>', ' ', html_cleaned, flags=re.DOTALL | re.IGNORECASE)
             html_cleaned = re.sub(r'<noscript[^>]*>.*?</noscript>', ' ', html_cleaned, flags=re.DOTALL | re.IGNORECASE)
-            # Remove HTML comments
-            html_cleaned = re.sub(r'<!--.*?-->', ' ', html_cleaned, flags=re.DOTALL)
+            # Remove HTML comments (replace with empty string to reconstruct comment-split words)
+            html_cleaned = re.sub(r'<!--.*?-->', '', html_cleaned, flags=re.DOTALL)
             
             # Replace all HTML tags with spaces so text doesn't merge
             text_with_spaces = re.sub(r'<[^>]+>', ' ', html_cleaned)
@@ -378,7 +378,8 @@ def extract_emails_from_html(html_content):
     html_cleaned = re.sub(r'<script[^>]*>.*?</script>', ' ', html_content, flags=re.DOTALL | re.IGNORECASE)
     html_cleaned = re.sub(r'<style[^>]*>.*?</style>', ' ', html_cleaned, flags=re.DOTALL | re.IGNORECASE)
     html_cleaned = re.sub(r'<noscript[^>]*>.*?</noscript>', ' ', html_cleaned, flags=re.DOTALL | re.IGNORECASE)
-    html_cleaned = re.sub(r'<!--.*?-->', ' ', html_cleaned, flags=re.DOTALL)
+    # Remove HTML comments (replace with empty string to reconstruct comment-split words)
+    html_cleaned = re.sub(r'<!--.*?-->', '', html_cleaned, flags=re.DOTALL)
     
     # 3. Replace tags with spaces so text doesn't merge
     text = re.sub(r'<[^>]+>', ' ', html_cleaned)
