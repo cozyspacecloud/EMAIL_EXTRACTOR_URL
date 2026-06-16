@@ -7,21 +7,57 @@ export default function LicenseGenerator() {
   const [history, setHistory] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [savedKeys, setSavedKeys] = useState<string[]>([]);
 
-  // Load history from API on mount
+  // Load history and saved keys from localStorage on mount
   useEffect(() => {
     const fetchHistory = async () => {
+      let parsedSaved: string[] = [];
+      try {
+        const localSaved = localStorage.getItem("cozy_saved_keys");
+        parsedSaved = localSaved ? JSON.parse(localSaved) : [];
+        setSavedKeys(parsedSaved);
+      } catch (e) {
+        console.error("Failed to parse saved keys", e);
+      }
+
       try {
         const res = await fetch("/api/history");
         const data = await res.json();
         if (data.history) {
-          setHistory(data.history);
+          // Merge server history with locally saved keys to ensure persistence
+          const merged = Array.from(new Set([...data.history, ...parsedSaved]));
+          setHistory(merged);
+        } else {
+          setHistory(parsedSaved);
         }
       } catch (e) {
         console.error("Failed to fetch history", e);
+        setHistory(parsedSaved);
       }
     };
     fetchHistory();
+  }, []);
+
+  const toggleSaveKey = useCallback((keyToSave: string) => {
+    setSavedKeys((prev) => {
+      const isSaved = prev.includes(keyToSave);
+      const updated = isSaved ? prev.filter((k) => k !== keyToSave) : [...prev, keyToSave];
+      try {
+        localStorage.setItem("cozy_saved_keys", JSON.stringify(updated));
+      } catch (e) {
+        console.error("Failed to write saved keys to localStorage", e);
+      }
+      return updated;
+    });
+
+    // Ensure the key stays visible in history
+    setHistory((prev) => {
+      if (!prev.includes(keyToSave)) {
+        return [keyToSave, ...prev];
+      }
+      return prev;
+    });
   }, []);
 
   const generateKey = useCallback(async () => {
@@ -39,7 +75,13 @@ export default function LicenseGenerator() {
         const histRes = await fetch("/api/history");
         const histData = await histRes.json();
         if (histData.history) {
-          setHistory(histData.history);
+          let parsedSaved: string[] = [];
+          try {
+            const localSaved = localStorage.getItem("cozy_saved_keys");
+            parsedSaved = localSaved ? JSON.parse(localSaved) : [];
+          } catch (e) {}
+          const merged = Array.from(new Set([...histData.history, ...parsedSaved]));
+          setHistory(merged);
         }
       }
     } catch (err) {
@@ -63,6 +105,15 @@ export default function LicenseGenerator() {
     const keyToDelete = history[indexToDelete];
     if (!keyToDelete) return;
 
+    // Remove from saved keys if it was saved
+    setSavedKeys((prev) => {
+      const updated = prev.filter((k) => k !== keyToDelete);
+      try {
+        localStorage.setItem("cozy_saved_keys", JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
     // Optimistic UI update
     const updatedHistory = history.filter((_, index) => index !== indexToDelete);
     setHistory(updatedHistory);
@@ -77,7 +128,13 @@ export default function LicenseGenerator() {
       const res = await fetch("/api/history");
       const data = await res.json();
       if (data.history) {
-        setHistory(data.history);
+        let parsedSaved: string[] = [];
+        try {
+          const localSaved = localStorage.getItem("cozy_saved_keys");
+          parsedSaved = localSaved ? JSON.parse(localSaved) : [];
+        } catch (e) {}
+        const merged = Array.from(new Set([...data.history, ...parsedSaved]));
+        setHistory(merged);
       }
     } catch (err) {
       console.error("Failed to delete key", err);
@@ -119,21 +176,38 @@ export default function LicenseGenerator() {
                   className={`w-full bg-slate-900/50 border ${key ? "border-blue-500/50" : "border-slate-700/50"} rounded-2xl px-6 py-5 text-xl md:text-2xl font-mono text-center tracking-[0.2em] focus:outline-none transition-all duration-300 ${key ? "text-cyan-400" : "text-slate-600"}`}
                 />
                 {key && (
-                  <button
-                    onClick={() => copyToClipboard(key)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-3 rounded-xl hover:bg-white/5 transition-colors group-hover:scale-110 active:scale-95"
-                    title="Copy to clipboard"
-                  >
-                    {copied ? (
-                      <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    ) : (
-                      <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                      </svg>
-                    )}
-                  </button>
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 bg-slate-900/80 backdrop-blur-md pl-2 pr-1 py-1 rounded-xl border border-slate-800/50">
+                    <button
+                      onClick={() => copyToClipboard(key)}
+                      className="p-2 rounded-lg hover:bg-white/5 transition-colors group-hover:scale-110 active:scale-95"
+                      title="Copy to clipboard"
+                    >
+                      {copied ? (
+                        <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : (
+                        <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                        </svg>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => toggleSaveKey(key)}
+                      className="p-2 rounded-lg hover:bg-white/5 transition-colors group-hover:scale-110 active:scale-95"
+                      title={savedKeys.includes(key) ? "Unsave Key" : "Save Key"}
+                    >
+                      {savedKeys.includes(key) ? (
+                        <svg className="w-6 h-6 text-cyan-400" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-6 h-6 text-slate-400 hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -188,6 +262,21 @@ export default function LicenseGenerator() {
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>
+                      </button>
+                      <button
+                        onClick={() => toggleSaveKey(h)}
+                        className="transition-colors duration-200"
+                        title={savedKeys.includes(h) ? "Unsave Key" : "Save Key"}
+                      >
+                        {savedKeys.includes(h) ? (
+                          <svg className="w-4 h-4 text-cyan-400" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4 text-slate-500 hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                          </svg>
+                        )}
                       </button>
                     </div>
                   </div>
